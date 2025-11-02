@@ -18,7 +18,7 @@ const trainingData = {
         {
           id: "topic-1-2", 
           title: "Understanding Apps and Settings",
-          videoUrl: "https://www.youtube.com/embed/jNQXAC9IVRw",
+          videoUrl: "https://www.youtube.com/embed/3gMOYZoMtEs",
           duration: "4:03",
           notes: "Discover how to install apps, manage settings, and customize your phone experience."
         }
@@ -31,14 +31,14 @@ const trainingData = {
         {
           id: "topic-2-1",
           title: "UPI Payments - Quick Start Guide",
-          videoUrl: "https://www.youtube.com/embed/lTTajzrSkCw",
+          videoUrl: "https://www.youtube.com/embed/EAux2r3AO3E",
           duration: "7:45",
           notes: "Master UPI payments for safe and convenient digital transactions."
         },
         {
           id: "topic-2-2",
           title: "Online Banking Security",
-          videoUrl: "https://www.youtube.com/embed/aqz-KE-bpKQ", 
+          videoUrl: "https://www.youtube.com/embed/b_oRofONh68", 
           duration: "5:10",
           notes: "Learn essential security practices for online banking and digital payments."
         }
@@ -51,21 +51,21 @@ const trainingData = {
         {
           id: "topic-3-1",
           title: "Product Photography with Phone",
-          videoUrl: "https://www.youtube.com/embed/dQw4w9WgXcQ",
+          videoUrl: "https://www.youtube.com/embed/uZeRLXODK5w",
           duration: "8:30",
           notes: "Take professional product photos using just your smartphone camera."
         },
         {
           id: "topic-3-2",
           title: "Pricing Your Products",
-          videoUrl: "https://www.youtube.com/embed/dQw4w9WgXcQ",
+          videoUrl: "https://www.youtube.com/embed/sF6AMj3H0jg",
           duration: "6:45",
           notes: "Learn how to price your products competitively for online sales."
         },
         {
           id: "topic-3-3",
           title: "Social Media Marketing",
-          videoUrl: "https://www.youtube.com/embed/dQw4w9WgXcQ",
+          videoUrl: "https://www.youtube.com/embed/I2pwcAVonKI",
           duration: "9:15",
           notes: "Use social media platforms to promote your business and reach customers."
         }

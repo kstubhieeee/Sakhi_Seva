@@ -5,107 +5,163 @@ import { ProductCard } from "@/components/marketplace/product-card"
 import { ProductForm, type ProductInput } from "@/components/marketplace/product-form"
 import { useEffect, useMemo, useState } from "react"
 import { cn } from "@/lib/utils"
+import { useAuth } from "@/contexts/AuthContext"
+import { Button } from "@/components/ui/button"
+import { Loader2, RefreshCw } from "lucide-react"
 
 type Product = {
-  id: string
+  _id: string
   name: string
   price: number
   description?: string
   image?: string
-  tags?: string[]
+  tags: string[]
+  sellerId: string
+  sellerName: string
+  sellerEmail: string
+  createdAt: string
+  updatedAt: string
 }
-
-const BROWSE_PRODUCTS: Product[] = [
-  {
-    id: "b1",
-    name: "Handloom Paithani Saree",
-    price: 12000,
-    description: "Traditional Paithani weave from Maharashtra artisans.",
-    tags: ["handloom", "saree", "artisan"],
-    image: "/paithani-saree-product.jpg",
-  },
-  {
-    id: "b2",
-    name: "Homemade Mango Pickle",
-    price: 250,
-    description: "Sun-dried, homemade, authentic taste.",
-    tags: ["pickle", "homemade", "food"],
-    image: "/mango-pickle-jar.png",
-  },
-  {
-    id: "b3",
-    name: "Warli Art Canvas",
-    price: 1800,
-    description: "Hand-painted Warli tribal art on canvas.",
-    tags: ["art", "handmade", "warli"],
-    image: "/warli-art-canvas.jpg",
-  },
-]
-
-const STORAGE_KEY = "sakhi-products"
 
 export default function MarketplacePage() {
   const [activeTab, setActiveTab] = useState<"browse" | "mine">("browse")
+  const [allProducts, setAllProducts] = useState<Product[]>([])
   const [myProducts, setMyProducts] = useState<Product[]>([])
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [submitting, setSubmitting] = useState(false)
+  
+  const { user } = useAuth()
 
-  useEffect(() => {
+  // Fetch all products
+  const fetchProducts = async () => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY)
-      if (saved) setMyProducts(JSON.parse(saved))
-    } catch {}
-  }, [])
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(myProducts))
-    } catch {}
-  }, [myProducts])
-
-  const editingProduct = useMemo(() => myProducts.find((p) => p.id === editingId), [editingId, myProducts])
-
-  function addProduct(input: ProductInput) {
-    const tags = (input.tags || "")
-      .split(",")
-      .map((t) => t.trim())
-      .filter(Boolean)
-    const newProduct: Product = {
-      id: crypto.randomUUID(),
-      name: input.name,
-      price: Number(input.price || 0),
-      description: input.description,
-      image: input.image,
-      tags,
+      setLoading(true)
+      const response = await fetch('/api/products')
+      const data = await response.json()
+      
+      if (response.ok) {
+        setAllProducts(data.products || [])
+        // Filter user's products
+        if (user) {
+          setMyProducts(data.products?.filter((p: Product) => p.sellerId === user.id) || [])
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching products:', error)
+    } finally {
+      setLoading(false)
     }
-    setMyProducts((prev) => [newProduct, ...prev])
-    setActiveTab("mine")
   }
 
-  function updateProduct(input: ProductInput) {
+  useEffect(() => {
+    fetchProducts()
+  }, [user])
+
+  const editingProduct = useMemo(() => myProducts.find((p) => p._id === editingId), [editingId, myProducts])
+
+  async function addProduct(input: ProductInput) {
+    if (!user) return
+    
+    try {
+      setSubmitting(true)
+      const tags = (input.tags || "")
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean)
+      
+      const response = await fetch('/api/products', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: input.name,
+          price: Number(input.price || 0),
+          description: input.description,
+          image: input.image,
+          tags,
+          sellerId: user.id,
+          sellerName: user.fullName,
+          sellerEmail: user.email,
+        }),
+      })
+
+      if (response.ok) {
+        await fetchProducts() // Refresh the list
+        setActiveTab("mine")
+      } else {
+        const error = await response.json()
+        alert(error.error || 'Failed to add product')
+      }
+    } catch (error) {
+      console.error('Error adding product:', error)
+      alert('Failed to add product')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function updateProduct(input: ProductInput) {
     if (!editingId) return
-    const tags = (input.tags || "")
-      .split(",")
-      .map((t) => t.trim())
-      .filter(Boolean)
-    setMyProducts((prev) =>
-      prev.map((p) =>
-        p.id === editingId
-          ? {
-              ...p,
-              name: input.name,
-              price: Number(input.price || 0),
-              description: input.description,
-              image: input.image,
-              tags,
-            }
-          : p,
-      ),
-    )
-    setEditingId(null)
+    
+    try {
+      setSubmitting(true)
+      const tags = (input.tags || "")
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean)
+      
+      const response = await fetch(`/api/products/${editingId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: input.name,
+          price: Number(input.price || 0),
+          description: input.description,
+          image: input.image,
+          tags,
+        }),
+      })
+
+      if (response.ok) {
+        await fetchProducts() // Refresh the list
+        setEditingId(null)
+      } else {
+        const error = await response.json()
+        alert(error.error || 'Failed to update product')
+      }
+    } catch (error) {
+      console.error('Error updating product:', error)
+      alert('Failed to update product')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
-  function removeProduct(id: string) {
-    setMyProducts((prev) => prev.filter((p) => p.id !== id))
+  async function removeProduct(id: string) {
+    if (!confirm('Are you sure you want to delete this product?')) return
+    
+    try {
+      setSubmitting(true)
+      const response = await fetch(`/api/products/${id}`, {
+        method: 'DELETE',
+      })
+
+      if (response.ok) {
+        await fetchProducts() // Refresh the list
+      } else {
+        const error = await response.json()
+        alert(error.error || 'Failed to delete product')
+      }
+    } catch (error) {
+      console.error('Error deleting product:', error)
+      alert('Failed to delete product')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -113,8 +169,22 @@ export default function MarketplacePage() {
       <SiteHeader />
       <section className="mx-auto max-w-6xl px-4 py-10">
         <header className="mb-6">
-          <h1 className="text-2xl font-semibold">Marketplace</h1>
-          <p className="text-sm text-foreground/70 mt-1">Browse community products or manage your own listings.</p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-semibold">Marketplace</h1>
+              <p className="text-sm text-foreground/70 mt-1">Browse community products or manage your own listings.</p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={fetchProducts}
+              disabled={loading}
+              className="flex items-center gap-2"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+          </div>
         </header>
 
         {/* Tabs (custom segmented control) */}
@@ -128,7 +198,7 @@ export default function MarketplacePage() {
             )}
             onClick={() => setActiveTab("browse")}
           >
-            Browse
+            Browse ({allProducts.length})
           </button>
           <button
             className={cn(
@@ -139,15 +209,27 @@ export default function MarketplacePage() {
             )}
             onClick={() => setActiveTab("mine")}
           >
-            My products
+            My products ({myProducts.length})
           </button>
         </div>
 
-        {activeTab === "browse" ? (
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+            <span className="ml-2 text-muted-foreground">Loading products...</span>
+          </div>
+        ) : activeTab === "browse" ? (
           <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
-            {BROWSE_PRODUCTS.map((p) => (
-              <ProductCard key={p.id} product={p} />
-            ))}
+            {allProducts.length === 0 ? (
+              <div className="col-span-full text-center py-12">
+                <p className="text-muted-foreground">No products available yet.</p>
+                <p className="text-sm text-muted-foreground mt-1">Be the first to add a product!</p>
+              </div>
+            ) : (
+              allProducts.map((p) => (
+                <ProductCard key={p._id} product={p} />
+              ))
+            )}
           </div>
         ) : (
           <div className="grid gap-8 md:grid-cols-2">
@@ -155,7 +237,11 @@ export default function MarketplacePage() {
               <h2 className="font-medium">Add a new product</h2>
               <p className="text-sm text-foreground/70 mt-1">Share your craft with the community.</p>
               <div className="mt-4">
-                <ProductForm onSubmit={addProduct} submitLabel="Add product" />
+                <ProductForm 
+                  onSubmit={addProduct} 
+                  submitLabel={submitting ? "Adding..." : "Add product"}
+                  disabled={submitting}
+                />
               </div>
             </div>
 
@@ -170,8 +256,8 @@ export default function MarketplacePage() {
                   </div>
                 ) : (
                   myProducts.map((p) =>
-                    editingId === p.id ? (
-                      <div key={p.id} className="rounded-lg border border-border bg-card p-5">
+                    editingId === p._id ? (
+                      <div key={p._id} className="rounded-lg border border-border bg-card p-5">
                         <h3 className="mb-3 font-medium">Edit: {p.name}</h3>
                         <ProductForm
                           defaultValue={{
@@ -182,29 +268,36 @@ export default function MarketplacePage() {
                             tags: (p.tags || []).join(", "),
                           }}
                           onSubmit={updateProduct}
-                          submitLabel="Save changes"
+                          submitLabel={submitting ? "Saving..." : "Save changes"}
+                          disabled={submitting}
                         />
                         <div className="mt-3">
-                          <button className="text-sm underline underline-offset-4" onClick={() => setEditingId(null)}>
+                          <button 
+                            className="text-sm underline underline-offset-4" 
+                            onClick={() => setEditingId(null)}
+                            disabled={submitting}
+                          >
                             Cancel
                           </button>
                         </div>
                       </div>
                     ) : (
                       <ProductCard
-                        key={p.id}
+                        key={p._id}
                         product={p}
                         actions={
                           <>
                             <button
-                              className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
-                              onClick={() => setEditingId(p.id)}
+                              className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
+                              onClick={() => setEditingId(p._id)}
+                              disabled={submitting}
                             >
                               Edit
                             </button>
                             <button
-                              className="rounded-md bg-destructive/10 px-3 py-1.5 text-sm text-destructive hover:bg-destructive/20"
-                              onClick={() => removeProduct(p.id)}
+                              className="rounded-md bg-destructive/10 px-3 py-1.5 text-sm text-destructive hover:bg-destructive/20 disabled:opacity-50"
+                              onClick={() => removeProduct(p._id)}
+                              disabled={submitting}
                             >
                               Delete
                             </button>

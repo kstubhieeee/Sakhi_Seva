@@ -1,33 +1,50 @@
 "use client"
 
 import type React from "react"
+import Link from "next/link"
+import Image from "next/image"
 
 type Product = {
-  id: string
+  _id?: string
+  id?: string
   name: string
   price: number
   description?: string
   image?: string
   tags?: string[]
+  sellerName?: string
+  sellerEmail?: string
+  createdAt?: string
 }
 
 export function ProductCard({ product, actions }: { product: Product; actions?: React.ReactNode }) {
-  return (
-    <div className="rounded-lg border border-border bg-card overflow-hidden">
-      <img
-        src={product.image || "/placeholder.svg?height=200&width=400&query=product image placeholder"}
-        alt={product.name}
-        className="h-40 w-full object-cover"
-      />
+  const productId = product._id || product.id
+  const isClickable = !actions && productId // Only clickable if no actions (not in edit mode)
+
+  const CardContent = (
+    <div className="rounded-lg border border-border bg-card overflow-hidden hover:shadow-md transition-shadow">
+      <div className="relative h-40 w-full">
+        <Image
+          src={product.image || "/placeholder.svg?height=200&width=400&query=product image placeholder"}
+          alt={product.name}
+          fill
+          className="object-cover"
+        />
+      </div>
       <div className="p-4">
         <div className="flex items-start justify-between gap-3">
-          <div>
+          <div className="flex-1">
             <h3 className="font-medium">{product.name}</h3>
             <p className="text-sm text-foreground/70 mt-1 line-clamp-2">
               {product.description || "No description provided."}
             </p>
+            {product.sellerName && (
+              <p className="text-xs text-muted-foreground mt-2">
+                by {product.sellerName}
+              </p>
+            )}
           </div>
-          <span className="rounded-md bg-primary px-2 py-1 text-xs font-semibold text-primary-foreground">
+          <span className="rounded-md bg-primary px-2 py-1 text-xs font-semibold text-primary-foreground whitespace-nowrap">
             ₹{product.price.toLocaleString("en-IN")}
           </span>
         </div>
@@ -46,4 +63,14 @@ export function ProductCard({ product, actions }: { product: Product; actions?: 
       </div>
     </div>
   )
+
+  if (isClickable) {
+    return (
+      <Link href={`/marketplace/product/${productId}`} className="block">
+        {CardContent}
+      </Link>
+    )
+  }
+
+  return CardContent
 }
