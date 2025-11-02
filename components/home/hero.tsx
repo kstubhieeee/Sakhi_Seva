@@ -62,10 +62,10 @@ export function Hero() {
                   "bg-primary text-primary-foreground hover:opacity-90",
                 )}
               >
-                <Link href="/training" aria-label="Start Training">
+                <Link href="/training" aria-label="Chat with AI Trainer">
                   <span className="inline-flex items-center gap-2">
                     <GraduationCap aria-hidden className="h-4 w-4" />
-                    Start Training
+                    AI Trainer
                   </span>
                 </Link>
               </Button>
@@ -111,7 +111,7 @@ export function Hero() {
           >
             <ul className="space-y-4">
               {[
-                "Short regional-language videos with progress tracking",
+                "Personal AI trainer available 24/7",
                 "Create and manage products to sell locally and online",
                 "Discover schemes for women-led micro businesses",
               ].map((text) => (

@@ -15,7 +15,7 @@ type Step = {
 }
 
 const steps: Step[] = [
-  { title: "Learn", desc: "Take short video courses", Icon: GraduationCap },
+  { title: "Learn", desc: "Chat with your AI trainer", Icon: GraduationCap },
   { title: "Create", desc: "Build your digital shop", Icon: Store },
   { title: "Grow", desc: "Sell and reach new markets", Icon: Rocket },
 ]
