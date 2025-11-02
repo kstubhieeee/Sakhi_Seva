@@ -139,8 +139,8 @@ export default function AIChat() {
     }
 
     return (
-        <div className="w-full max-w-4xl mx-auto py-4 flex flex-col h-[calc(100vh-200px)]">
-            <div className="bg-black/5 dark:bg-white/5 rounded-2xl p-1.5 pt-4 flex-1 flex flex-col">
+        <div className="w-full max-w-4xl mx-auto py-4 flex flex-col h-[calc(100vh-250px)]">
+            <div className="bg-black/5 dark:bg-white/5 rounded-2xl p-1.5 pt-4 flex-1 flex flex-col min-h-0">
                 <div className="flex items-center gap-2 mb-2.5 mx-2">
                     <div className="flex-1 flex items-center gap-2">
                         {GEMINI_ICON}
