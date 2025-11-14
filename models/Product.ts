@@ -9,6 +9,7 @@ export interface IProduct extends Document {
   sellerId: string
   sellerName: string
   sellerEmail: string
+  sellerPhoneNumber: string
   createdAt: Date
   updatedAt: Date
 }
@@ -50,6 +51,10 @@ const ProductSchema = new Schema<IProduct>({
   sellerEmail: {
     type: String,
     required: [true, 'Seller email is required'],
+    trim: true
+  },
+  sellerPhoneNumber: {
+    type: String,
     trim: true
   }
 }, {

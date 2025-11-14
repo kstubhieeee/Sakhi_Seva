@@ -21,7 +21,8 @@ const productSchema = z.object({
   tags: z.array(z.string()).optional(),
   sellerId: z.string().min(1, 'Seller ID is required'),
   sellerName: z.string().min(1, 'Seller name is required'),
-  sellerEmail: z.string().email('Invalid seller email')
+  sellerEmail: z.string().email('Invalid seller email'),
+  sellerPhoneNumber: z.string().optional()
 })
 
 // GET - Fetch all products
@@ -36,9 +37,32 @@ export async function GET(request: NextRequest) {
     // MongoDB mode
     await connectDB()
     
-    const products = await Product.find({})
+    let products = await Product.find({})
       .sort({ createdAt: -1 })
       .lean()
+
+    let User: any = null;
+    try {
+      User = require('@/models/User').default;
+    } catch (error) {
+      console.log('User model not available');
+    }
+
+    if (User) {
+      const productsWithoutPhone = products.filter((p: any) => !p.sellerPhoneNumber);
+      if (productsWithoutPhone.length > 0) {
+        const userIds = [...new Set(productsWithoutPhone.map((p: any) => p.sellerId))];
+        const users = await User.find({ _id: { $in: userIds } }).select('_id phoneNumber').lean();
+        const userPhoneMap = new Map(users.map((u: any) => [u._id.toString(), u.phoneNumber]));
+        
+        for (const product of products) {
+          if (!product.sellerPhoneNumber && userPhoneMap.has(product.sellerId)) {
+            product.sellerPhoneNumber = userPhoneMap.get(product.sellerId);
+            await Product.findByIdAndUpdate(product._id, { sellerPhoneNumber: userPhoneMap.get(product.sellerId) });
+          }
+        }
+      }
+    }
 
     return NextResponse.json({ products })
 
@@ -65,6 +89,7 @@ export async function POST(request: NextRequest) {
       const mockProduct = {
         _id: `product_${Date.now()}`,
         ...validatedData,
+        sellerPhoneNumber: validatedData.sellerPhoneNumber || '+1234567890',
         createdAt: new Date(),
         updatedAt: new Date()
       }

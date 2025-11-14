@@ -21,6 +21,7 @@ interface Product {
   sellerId: string
   sellerName: string
   sellerEmail: string
+  sellerPhoneNumber?: string
   createdAt: string
   updatedAt: string
 }
@@ -181,14 +182,26 @@ export default function ProductPage({
                     </div>
                     
                     <div className="space-y-2">
-                      <Button 
-                        variant="outline" 
-                        className="w-full justify-start"
-                        onClick={() => window.open(`mailto:${product.sellerEmail}`, '_blank')}
-                      >
-                        <Mail className="w-4 h-4 mr-2" />
-                        Contact Seller
-                      </Button>
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Mail className="w-4 h-4" />
+                        <a 
+                          href={`mailto:${product.sellerEmail}`}
+                          className="hover:text-foreground hover:underline"
+                        >
+                          {product.sellerEmail}
+                        </a>
+                      </div>
+                      {product.sellerPhoneNumber && (
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <Phone className="w-4 h-4" />
+                          <a 
+                            href={`tel:${product.sellerPhoneNumber}`}
+                            className="hover:text-foreground hover:underline"
+                          >
+                            {product.sellerPhoneNumber}
+                          </a>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </CardContent>

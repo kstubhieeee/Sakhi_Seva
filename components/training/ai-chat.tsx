@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
-import { ArrowRight, Paperclip, Loader2, ExternalLink, PlayCircle, FileText, Newspaper } from "lucide-react"
+import { ArrowRight, Paperclip, Loader2, ExternalLink, PlayCircle, FileText, Newspaper, MessageSquare, Plus, Trash2, Menu, X } from "lucide-react"
 import { ResourcePreview } from "./resource-preview"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
@@ -64,12 +64,27 @@ interface Message {
     content: string
     citations?: Array<{ title: string; url: string; index: number }>
     structuredData?: StructuredData
+    loadingResources?: {
+        youtube: boolean
+        articles: boolean
+    }
+}
+
+interface ChatListItem {
+    id: string
+    title: string
+    createdAt: string
+    updatedAt: string
 }
 
 export default function AIChat() {
     const [input, setInput] = useState("")
     const [messages, setMessages] = useState<Message[]>([])
     const [loading, setLoading] = useState(false)
+    const [chatId, setChatId] = useState<string | null>(null)
+    const [chats, setChats] = useState<ChatListItem[]>([])
+    const [loadingChats, setLoadingChats] = useState(false)
+    const [sidebarOpen, setSidebarOpen] = useState(false)
     const messagesEndRef = useRef<HTMLDivElement>(null)
     const { textareaRef, adjustHeight } = useAutoResizeTextarea({
         minHeight: 72,
@@ -79,6 +94,74 @@ export default function AIChat() {
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
     }, [messages])
+
+    useEffect(() => {
+        loadChats()
+    }, [])
+
+    const loadChats = async () => {
+        try {
+            setLoadingChats(true)
+            const response = await fetch('/api/training/chats')
+            const data = await response.json()
+            if (response.ok) {
+                setChats(data.chats || [])
+            }
+        } catch (error) {
+            console.error('Error loading chats:', error)
+        } finally {
+            setLoadingChats(false)
+        }
+    }
+
+    const loadChat = async (id: string) => {
+        try {
+            setLoading(true)
+            const response = await fetch(`/api/training/chats/${id}`)
+            const data = await response.json()
+            if (response.ok) {
+                setChatId(id)
+                const loadedMessages = (data.chat.messages || []).map((msg: any) => ({
+                    role: msg.role,
+                    content: msg.content,
+                    citations: msg.citations || [],
+                    structuredData: msg.structuredData
+                }))
+                setMessages(loadedMessages)
+                setSidebarOpen(false)
+            }
+        } catch (error) {
+            console.error('Error loading chat:', error)
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    const createNewChat = () => {
+        setChatId(null)
+        setMessages([])
+        setInput("")
+        setSidebarOpen(false)
+    }
+
+    const deleteChat = async (id: string, e: React.MouseEvent) => {
+        e.stopPropagation()
+        if (!confirm('Are you sure you want to delete this chat?')) return
+        
+        try {
+            const response = await fetch(`/api/training/chats/${id}`, {
+                method: 'DELETE'
+            })
+            if (response.ok) {
+                if (chatId === id) {
+                    createNewChat()
+                }
+                loadChats()
+            }
+        } catch (error) {
+            console.error('Error deleting chat:', error)
+        }
+    }
 
     const handleSend = async () => {
         if (!input.trim() || loading) return
@@ -101,6 +184,7 @@ export default function AIChat() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     message: userMessage,
+                    chatId: chatId || undefined,
                     history: conversationHistory
                 })
             })
@@ -108,12 +192,118 @@ export default function AIChat() {
             const data = await response.json()
 
             if (response.ok) {
-                setMessages(prev => [...prev, {
+                const aiMessage: Message = {
                     role: 'model',
                     content: data.message,
                     citations: data.citations || [],
-                    structuredData: data.structuredData
-                }])
+                    structuredData: data.structuredData || {
+                        header: "Recommended Resources",
+                        intro: data.message,
+                        youtubeVideos: [],
+                        resources: []
+                    },
+                    loadingResources: data.needsResources ? {
+                        youtube: true,
+                        articles: true
+                    } : undefined
+                }
+
+                let messageIndexRef: number;
+                setMessages(prev => {
+                    const newMessages = [...prev, aiMessage]
+                    messageIndexRef = newMessages.length - 1
+                    return newMessages
+                })
+
+                if (data.needsResources) {
+                    Promise.all([
+                        fetch('/api/training/chat/resources', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ message: userMessage, type: 'youtube' })
+                        }).then(res => res.json()).then(resourceData => {
+                            setMessages(prev => {
+                                const updated = [...prev]
+                                if (updated[messageIndexRef] && updated[messageIndexRef].structuredData) {
+                                    updated[messageIndexRef] = {
+                                        ...updated[messageIndexRef],
+                                        structuredData: {
+                                            ...updated[messageIndexRef].structuredData!,
+                                            youtubeVideos: resourceData.youtubeVideos || []
+                                        },
+                                        loadingResources: {
+                                            ...updated[messageIndexRef].loadingResources!,
+                                            youtube: false
+                                        }
+                                    }
+                                }
+                                return updated
+                            })
+                        }).catch(err => {
+                            console.error('Error fetching YouTube videos:', err)
+                            setMessages(prev => {
+                                const updated = [...prev]
+                                if (updated[messageIndexRef] && updated[messageIndexRef].loadingResources) {
+                                    updated[messageIndexRef] = {
+                                        ...updated[messageIndexRef],
+                                        loadingResources: {
+                                            ...updated[messageIndexRef].loadingResources!,
+                                            youtube: false
+                                        }
+                                    }
+                                }
+                                return updated
+                            })
+                        }),
+                        fetch('/api/training/chat/resources', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ message: userMessage, type: 'articles' })
+                        }).then(res => res.json()).then(resourceData => {
+                            setMessages(prev => {
+                                const updated = [...prev]
+                                if (updated[messageIndexRef] && updated[messageIndexRef].structuredData) {
+                                    updated[messageIndexRef] = {
+                                        ...updated[messageIndexRef],
+                                        structuredData: {
+                                            ...updated[messageIndexRef].structuredData!,
+                                            resources: resourceData.resources || []
+                                        },
+                                        loadingResources: {
+                                            ...updated[messageIndexRef].loadingResources!,
+                                            articles: false
+                                        }
+                                    }
+                                }
+                                return updated
+                            })
+                        }).catch(err => {
+                            console.error('Error fetching articles:', err)
+                            setMessages(prev => {
+                                const updated = [...prev]
+                                if (updated[messageIndexRef] && updated[messageIndexRef].loadingResources) {
+                                    updated[messageIndexRef] = {
+                                        ...updated[messageIndexRef],
+                                        loadingResources: {
+                                            ...updated[messageIndexRef].loadingResources!,
+                                            articles: false
+                                        }
+                                    }
+                                }
+                                return updated
+                            })
+                        })
+                    ]).then(() => {
+                        if (data.chatId) {
+                            loadChat(data.chatId)
+                        }
+                    })
+                }
+
+                if (data.chatId) {
+                    setChatId(data.chatId)
+                    loadChats()
+                }
             } else {
                 setMessages(prev => [...prev, {
                     role: 'model',
@@ -139,16 +329,100 @@ export default function AIChat() {
     }
 
     return (
-        <div className="w-full max-w-4xl mx-auto py-4 flex flex-col h-[calc(100vh-250px)]">
-            <div className="bg-black/5 dark:bg-white/5 rounded-2xl p-1.5 pt-4 flex-1 flex flex-col min-h-0">
-                <div className="flex items-center gap-2 mb-2.5 mx-2">
-                    <div className="flex-1 flex items-center gap-2">
-                        {GEMINI_ICON}
-                        <h3 className="text-black dark:text-white/90 text-xs tracking-tighter">
-                            Your AI trainer is ready
-                        </h3>
-                    </div>
+        <div className="w-full max-w-6xl mx-auto py-4 flex gap-4 h-[calc(100vh-250px)] relative">
+            {sidebarOpen && (
+                <div
+                    className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+                    onClick={() => setSidebarOpen(false)}
+                />
+            )}
+            <div className={cn(
+                "w-64 bg-card border border-border rounded-2xl p-4 flex flex-col transition-all duration-300 z-50",
+                sidebarOpen ? "fixed left-4 top-20 bottom-20 lg:relative lg:left-0 lg:top-0 lg:bottom-0" : "hidden lg:flex"
+            )}>
+                <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-lg font-semibold">Chat History</h2>
+                    <button
+                        onClick={createNewChat}
+                        className="p-2 hover:bg-accent rounded-lg transition-colors"
+                        title="New Chat"
+                    >
+                        <Plus className="w-4 h-4" />
+                    </button>
                 </div>
+                <div className="flex-1 overflow-y-auto space-y-2">
+                    {loadingChats ? (
+                        <div className="flex items-center justify-center py-8">
+                            <Loader2 className="w-5 h-5 animate-spin" />
+                        </div>
+                    ) : chats.length === 0 ? (
+                        <p className="text-sm text-muted-foreground text-center py-8">
+                            No chats yet. Start a new conversation!
+                        </p>
+                    ) : (
+                        chats.map((chat) => (
+                            <div
+                                key={chat.id}
+                                onClick={() => loadChat(chat.id)}
+                                className={cn(
+                                    "p-3 rounded-lg cursor-pointer transition-colors group relative",
+                                    chatId === chat.id
+                                        ? "bg-primary text-primary-foreground"
+                                        : "bg-accent hover:bg-accent/80"
+                                )}
+                            >
+                                <div className="flex items-start justify-between gap-2">
+                                    <div className="flex-1 min-w-0">
+                                        <p className={cn(
+                                            "text-sm font-medium truncate",
+                                            chatId === chat.id ? "text-primary-foreground" : ""
+                                        )}>
+                                            {chat.title}
+                                        </p>
+                                        <p className={cn(
+                                            "text-xs mt-1",
+                                            chatId === chat.id
+                                                ? "text-primary-foreground/70"
+                                                : "text-muted-foreground"
+                                        )}>
+                                            {new Date(chat.updatedAt).toLocaleDateString()}
+                                        </p>
+                                    </div>
+                                    <button
+                                        onClick={(e) => deleteChat(chat.id, e)}
+                                        className={cn(
+                                            "opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-destructive/20 transition-opacity",
+                                            chatId === chat.id && "opacity-100"
+                                        )}
+                                    >
+                                        <Trash2 className={cn(
+                                            "w-3 h-3",
+                                            chatId === chat.id ? "text-primary-foreground" : "text-destructive"
+                                        )} />
+                                    </button>
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
+            </div>
+
+            <div className="flex-1 flex flex-col min-w-0">
+                <div className="bg-black/5 dark:bg-white/5 rounded-2xl p-1.5 pt-4 flex-1 flex flex-col min-h-0">
+                    <div className="flex items-center gap-2 mb-2.5 mx-2">
+                        <button
+                            onClick={() => setSidebarOpen(!sidebarOpen)}
+                            className="lg:hidden p-2 hover:bg-accent rounded-lg transition-colors"
+                        >
+                            {sidebarOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+                        </button>
+                        <div className="flex-1 flex items-center gap-2">
+                            {GEMINI_ICON}
+                            <h3 className="text-black dark:text-white/90 text-xs tracking-tighter">
+                                Your AI trainer is ready
+                            </h3>
+                        </div>
+                    </div>
 
                 <div className="flex-1 overflow-y-auto px-2 py-4 space-y-4 mb-4">
                     {messages.length === 0 ? (
@@ -193,46 +467,58 @@ export default function AIChat() {
                                                             <p className="text-muted-foreground mb-4">{msg.structuredData.intro}</p>
                                                         )}
                                                     </div>
-                                                    {msg.structuredData.youtubeVideos && msg.structuredData.youtubeVideos.length > 0 && (
+                                                    {(msg.structuredData.youtubeVideos && msg.structuredData.youtubeVideos.length > 0) || msg.loadingResources?.youtube ? (
                                                         <div>
                                                             <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
                                                                 <PlayCircle className="w-4 h-4" />
                                                                 YouTube Videos
                                                             </h4>
-                                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                                                {msg.structuredData.youtubeVideos.map((video, idx) => (
-                                                                    <ResourcePreview
-                                                                        key={idx}
-                                                                        url={video.link}
-                                                                        title={video.title}
-                                                                        type="video"
-                                                                        summary={video.summary}
-                                                                    />
-                                                                ))}
-                                                            </div>
+                                                            {msg.loadingResources?.youtube ? (
+                                                                <div className="flex items-center justify-center py-8">
+                                                                    <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                                                                </div>
+                                                            ) : (
+                                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                                    {msg.structuredData.youtubeVideos?.map((video, idx) => (
+                                                                        <ResourcePreview
+                                                                            key={idx}
+                                                                            url={video.link}
+                                                                            title={video.title}
+                                                                            type="video"
+                                                                            summary={video.summary}
+                                                                        />
+                                                                    ))}
+                                                                </div>
+                                                            )}
                                                         </div>
-                                                    )}
+                                                    ) : null}
 
-                                                    {msg.structuredData.resources && msg.structuredData.resources.length > 0 && (
+                                                    {(msg.structuredData.resources && msg.structuredData.resources.length > 0) || msg.loadingResources?.articles ? (
                                                         <div>
                                                             <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
                                                                 <FileText className="w-4 h-4" />
                                                                 Articles & Blogs
                                                             </h4>
-                                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                                                {msg.structuredData.resources.map((resource, idx) => (
-                                                                    <ResourcePreview
-                                                                        key={idx}
-                                                                        url={resource.link}
-                                                                        title={resource.title}
-                                                                        type={resource.type}
-                                                                        summary={resource.summary}
-                                                                        image={resource.image}
-                                                                    />
-                                                                ))}
-                                                            </div>
+                                                            {msg.loadingResources?.articles ? (
+                                                                <div className="flex items-center justify-center py-8">
+                                                                    <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                                                                </div>
+                                                            ) : (
+                                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                                    {msg.structuredData.resources?.map((resource, idx) => (
+                                                                        <ResourcePreview
+                                                                            key={idx}
+                                                                            url={resource.link}
+                                                                            title={resource.title}
+                                                                            type={resource.type}
+                                                                            summary={resource.summary}
+                                                                            image={resource.image}
+                                                                        />
+                                                                    ))}
+                                                                </div>
+                                                            )}
                                                         </div>
-                                                    )}
+                                                    ) : null}
                                                 </div>
                                             ) : (
                                                 <div className="prose prose-sm dark:prose-invert max-w-none">
@@ -378,6 +664,7 @@ export default function AIChat() {
                         </div>
                     </div>
                 </div>
+            </div>
             </div>
         </div>
     )

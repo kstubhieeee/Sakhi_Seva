@@ -7,9 +7,22 @@ import {
   validateAndFetchArticles,
   filterErrorPages,
 } from "@/lib/scrapers/article-fetcher";
+import { verifyToken } from "@/lib/jwt";
+import { needsResources } from "@/lib/utils/needs-resources";
+
+let connectDB: any = null;
+let Chat: any = null;
+
+try {
+  connectDB = require('@/lib/mongodb').default;
+  Chat = require('@/models/Chat').default;
+} catch (error) {
+  console.warn('MongoDB not available, using fallback mode');
+}
 
 const chatSchema = z.object({
   message: z.string().min(1, "Message is required"),
+  chatId: z.string().optional(),
   history: z
     .array(
       z.object({
@@ -22,8 +35,46 @@ const chatSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
+    const token = request.cookies.get('auth-token')?.value;
+    
+    if (!token) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      );
+    }
+
+    const payload = verifyToken(token);
+    if (!payload) {
+      return NextResponse.json(
+        { error: 'Invalid or expired token' },
+        { status: 401 }
+      );
+    }
+
+    const userId = payload.userId;
+
     const body = await request.json();
-    const { message, history = [] } = chatSchema.parse(body);
+    const { message, chatId, history = [] } = chatSchema.parse(body);
+
+    let existingChat = null;
+    let fullHistory = history;
+
+    if (chatId && connectDB && Chat) {
+      try {
+        await connectDB();
+        existingChat = await Chat.findOne({ _id: chatId, userId });
+        
+        if (existingChat) {
+          fullHistory = existingChat.messages.map((msg: any) => ({
+            role: msg.role,
+            content: msg.content
+          }));
+        }
+      } catch (error) {
+        console.log('Error loading chat:', error);
+      }
+    }
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
@@ -38,190 +89,99 @@ export async function POST(request: NextRequest) {
 
     const ai = new GoogleGenAI({ apiKey });
 
-    const queryPrompt = `${message}
+    const contextHistory = fullHistory.length > 0 
+      ? `Previous conversation:\n${fullHistory.slice(-10).map((h: any) => `${h.role}: ${h.content}`).join('\n')}\n\n`
+      : '';
 
-Generate ONLY search queries in the following JSON format:
+    const shouldFetchResources = await needsResources(message, fullHistory, ai);
 
-{
-  "youtubeQueries": ["search query 1", "search query 2", "search query 3"],
-  "articleQueries": ["search query 1", "search query 2", "search query 3"]
-}
+    let responseText = "";
+    let structuredData = null;
+    let youtubeVideos: any[] = [];
+    let validatedArticles: any[] = [];
 
-Generate 3-5 YouTube search queries and 3-5 article/blog search queries. Return ONLY valid JSON, no other text.`;
-
-    const response = await retryWithBackoff(() =>
-      ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: queryPrompt,
-      })
-    );
-
-    const responseText = response.text || "";
-
-    let queries = null;
-    try {
-      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        queries = JSON.parse(jsonMatch[0]);
-      }
-    } catch (parseError) {
-      console.log("Could not parse queries JSON");
-      return NextResponse.json(
-        { error: "Failed to generate search queries", message: responseText },
-        { status: 500 }
-      );
-    }
-
-    if (!queries || !queries.youtubeQueries || !queries.articleQueries) {
-      return NextResponse.json(
-        { error: "Invalid search queries format" },
-        { status: 500 }
-      );
-    }
-
-    const youtubeVideos = await Promise.all(
-      queries.youtubeQueries.slice(0, 3).map((q: string) => searchYouTube(q))
-    ).then((results) => results.flat());
-
-    console.log("YouTube results:", youtubeVideos.length);
-
-    const groundingTool = {
-      googleSearch: {},
-    };
-
-    const config = {
-      tools: [groundingTool],
-    };
-
-    const summaryPrompt = `Provide a brief, informative 3-4 sentence summary about: ${message}
+    if (shouldFetchResources) {
+      const summaryPrompt = `Provide a brief, informative 3-4 sentence summary about: ${message}
 
 Return ONLY the summary text, no additional formatting or explanation.`;
 
-    let aiSummary =
-      "Here are the best resources I found to help you learn about this topic.";
+      let aiSummary = "Here are the best resources I found to help you learn about this topic.";
 
-    try {
-      const summaryResponse = await retryWithBackoff(() =>
+      try {
+        const summaryResponse = await retryWithBackoff(() =>
+          ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: summaryPrompt,
+          })
+        );
+        aiSummary = summaryResponse.text || aiSummary;
+      } catch (error) {
+        console.log("Could not generate summary, using default");
+      }
+
+      responseText = aiSummary;
+      structuredData = {
+        header: "Recommended Resources",
+        intro: aiSummary,
+        youtubeVideos: [],
+        resources: [],
+      };
+    } else {
+      const simplePrompt = `${contextHistory}User: ${message}\n\nProvide a helpful, concise response.`;
+      
+      const response = await retryWithBackoff(() =>
         ai.models.generateContent({
           model: "gemini-2.5-flash",
-          contents: summaryPrompt,
-          config,
+          contents: simplePrompt,
         })
       );
-      aiSummary = summaryResponse.text || aiSummary;
-    } catch (error) {
-      console.log("Could not generate summary, using default");
+      
+      responseText = response.text || "";
     }
 
-    const articlePrompt = `Based on these queries: ${queries.articleQueries.join(
-      ", "
-    )}
-
-Using your Google Search grounding, find 5-7 high-quality articles or blogs about this topic. Return ONLY a JSON array in this format:
-
-[
-  {
-    "title": "Article title",
-    "link": "Full URL",
-    "summary": "Brief 2-3 sentence summary"
-  }
-]
-
-Return ONLY valid JSON, no additional text.`;
-
-    const articleResponse = await retryWithBackoff(() =>
-      ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: articlePrompt,
-        config,
-      })
-    );
-
-    const articleResponseText = articleResponse.text || "";
-
-    let articles: any[] = [];
-    try {
-      const jsonMatch = articleResponseText.match(/\[[\s\S]*\]/);
-      if (jsonMatch) {
-        articles = JSON.parse(jsonMatch[0]);
-      }
-    } catch (parseError) {
-      console.log("Could not parse articles JSON");
-    }
-
-    const groundingMetadata =
-      (articleResponse as any).candidates?.[0]?.groundingMetadata || null;
-
-    let citations: Array<{ title: string; url: string; index: number }> = [];
-
-    if (groundingMetadata?.groundingChunks) {
-      groundingMetadata.groundingChunks.forEach((chunk: any, index: number) => {
-        if (chunk.web) {
-          citations.push({
-            title: chunk.web.title || "Untitled",
-            url: chunk.web.uri || "",
-            index: index + 1,
-          });
-        }
-      });
-    }
-
-    console.log("Article results:", articles.length);
-
-    let allUrls: string[] = [];
-
-    if (articles.length > 0) {
-      allUrls = articles.map((a: any) => a.link);
-    } else if (citations.length > 0) {
-      allUrls = citations.map((c) => c.url);
-    }
-
-    console.log(
-      "Validating and fetching article metadata for",
-      allUrls.length,
-      "URLs"
-    );
-
-    let validatedArticles = await validateAndFetchArticles(allUrls);
-
-    console.log("Valid articles found:", validatedArticles.length);
-
-    if (validatedArticles.length === 0 && articles.length > 0) {
-      const filteredArticles = filterErrorPages(articles);
-      validatedArticles = filteredArticles.slice(0, 5).map((article: any) => ({
-        title: article.title,
-        link: article.link,
-        summary: article.summary,
-      }));
-    } else if (validatedArticles.length === 0 && citations.length > 0) {
-      validatedArticles = citations.slice(0, 5).map((cite) => ({
-        title: cite.title,
-        link: cite.url,
-        summary: `Learn more about ${cite.title}`,
-      }));
-    }
-
-    const structuredData = {
-      header: "Recommended Resources",
-      intro: aiSummary,
-      youtubeVideos: youtubeVideos.slice(0, 5).map((video) => ({
-        title: video.title,
-        link: video.link,
-        summary: video.summary,
-      })),
-      resources: validatedArticles.slice(0, 5).map((article) => ({
-        type: "article" as const,
-        title: article.title,
-        link: article.link,
-        summary: article.summary,
-        image: article.image,
-      })),
+    const userMessage = {
+      role: 'user' as const,
+      content: message
     };
+
+    const aiMessage = {
+      role: 'model' as const,
+      content: responseText,
+      citations: [],
+      structuredData
+    };
+
+    let savedChatId = chatId;
+
+    if (connectDB && Chat) {
+      try {
+        await connectDB();
+        
+        if (existingChat) {
+          existingChat.messages.push(userMessage, aiMessage);
+          await existingChat.save();
+          savedChatId = existingChat._id.toString();
+        } else {
+          const title = message.length > 50 ? message.substring(0, 50) + '...' : message;
+          const newChat = new Chat({
+            userId,
+            title,
+            messages: [userMessage, aiMessage]
+          });
+          await newChat.save();
+          savedChatId = newChat._id.toString();
+        }
+      } catch (error) {
+        console.error('Error saving chat:', error);
+      }
+    }
 
     return NextResponse.json({
       message: responseText,
       structuredData,
       citations: [],
+      chatId: savedChatId,
+      needsResources: shouldFetchResources
     });
   } catch (error: any) {
     console.error("Chat error:", error);

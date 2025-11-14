@@ -1,5 +1,6 @@
 import * as cheerio from 'cheerio';
 import axios from 'axios';
+import { getCached, setCached } from '@/lib/utils/cache';
 
 export interface YouTubeVideo {
   title: string;
@@ -8,6 +9,10 @@ export interface YouTubeVideo {
 }
 
 export async function searchYouTube(query: string): Promise<YouTubeVideo[]> {
+  const cacheKey = `youtube:${query}`;
+  const cached = getCached<YouTubeVideo[]>(cacheKey);
+  if (cached) return cached;
+
   const videos: YouTubeVideo[] = [];
   
   try {
@@ -15,8 +20,14 @@ export async function searchYouTube(query: string): Promise<YouTubeVideo[]> {
     
     const response = await axios.get(searchUrl, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      }
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+      },
+      timeout: 6000,
+      maxRedirects: 3
     });
     
     const $ = cheerio.load(response.data);
@@ -69,6 +80,10 @@ export async function searchYouTube(query: string): Promise<YouTubeVideo[]> {
     }
   } catch (error) {
     console.error('YouTube search error:', error);
+  }
+  
+  if (videos.length > 0) {
+    setCached(cacheKey, videos);
   }
   
   return videos;

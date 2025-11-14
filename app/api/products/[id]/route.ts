@@ -41,6 +41,7 @@ export async function GET(
         sellerId: 'demo_user',
         sellerName: 'Demo User',
         sellerEmail: 'demo@example.com',
+        sellerPhoneNumber: '+1234567890',
         createdAt: new Date(),
         updatedAt: new Date()
       }
@@ -51,12 +52,26 @@ export async function GET(
     // MongoDB mode
     await connectDB()
     
-    const product = await Product.findById(id)
+    let product = await Product.findById(id).lean()
     if (!product) {
       return NextResponse.json(
         { error: 'Product not found' },
         { status: 404 }
       )
+    }
+
+    if (!product.sellerPhoneNumber) {
+      let User: any = null;
+      try {
+        User = require('@/models/User').default;
+        const user = await User.findById(product.sellerId).select('phoneNumber').lean();
+        if (user && user.phoneNumber) {
+          product.sellerPhoneNumber = user.phoneNumber;
+          await Product.findByIdAndUpdate(id, { sellerPhoneNumber: user.phoneNumber });
+        }
+      } catch (error) {
+        console.log('Could not fetch phone number from user:', error);
+      }
     }
 
     return NextResponse.json({ product })
@@ -91,6 +106,7 @@ export async function PUT(
         sellerId: 'demo_user',
         sellerName: 'Demo User',
         sellerEmail: 'demo@example.com',
+        sellerPhoneNumber: '+1234567890',
         createdAt: new Date(),
         updatedAt: new Date()
       }

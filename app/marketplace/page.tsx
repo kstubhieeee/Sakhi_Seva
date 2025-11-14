@@ -20,6 +20,7 @@ type Product = {
   sellerId: string
   sellerName: string
   sellerEmail: string
+  sellerPhoneNumber: string
   createdAt: string
   updatedAt: string
 }
@@ -85,6 +86,7 @@ export default function MarketplacePage() {
           sellerId: user.id,
           sellerName: user.fullName,
           sellerEmail: user.email,
+          sellerPhoneNumber: user.phoneNumber,
         }),
       })
 
